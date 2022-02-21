@@ -8,6 +8,8 @@ function estimate_value end
 estimate_value(f::Function, mdp::Union{POMDP,MDP}, state, depth::Int) = f(mdp, state, depth)
 estimate_value(estimator::Number, mdp::Union{POMDP,MDP}, state, depth::Int) = convert(Float64, estimator)
 
+function estimate_q_value end
+
 """
 RolloutEstimator
 

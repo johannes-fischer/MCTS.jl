@@ -15,6 +15,8 @@ export
     MCTSPlanner,
     DPWSolver,
     DPWPlanner,
+    BeliefDPWSolver,
+    BeliefDPWPlanner,
     BeliefMCTSSolver,
     AbstractMCTSPlanner,
     AbstractMCTSSolver,
@@ -28,6 +30,7 @@ export
     next_action,
     clear_tree!,
     estimate_value,
+    estimate_q_value,
     init_N,
     init_Q,
     children,
@@ -54,6 +57,8 @@ include("domain_knowledge.jl")
 include("vanilla.jl")
 include("dpw_types.jl")
 include("dpw.jl")
+include("belief_dpw_types.jl")
+include("belief_dpw.jl")
 include("action_gen.jl")
 include("util.jl")
 include("default_action.jl")
