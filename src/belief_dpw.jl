@@ -60,7 +60,7 @@ function POMDPModelTools.action_info(p::BeliefDPWPlanner, s; tree_in_info=false)
             end
         end
         p.reset_callback(p.mdp, s) # Optional: leave the MDP in the current state.
-        info[:search_time_us] = (timer() - start_s) * 1e6
+        info[:search_time] = timer() - start_s
         info[:tree_queries] = nquery
         if p.solver.tree_in_info || tree_in_info
             info[:tree] = tree
@@ -110,6 +110,10 @@ function simulate(dpw::BeliefDPWPlanner, snode::Int, d::Int)
     # else
     if isempty(tree.children[snode])
         q_vals = MCTS.estimate_q_value(dpw.solved_estimate, dpw.mdp, s, d)
+        if d  >= solver.depth - 1
+            @show q_vals
+        end
+        @assert length(q_vals) == length(actions(dpw.mdp, s))
         prior = exp.(q_vals)
         prior /= sum(prior)
 
@@ -153,7 +157,7 @@ function simulate(dpw::BeliefDPWPlanner, snode::Int, d::Int)
     end
 
     if new_node
-        q = r + discount(dpw.mdp)*maximum(MCTS.estimate_value(dpw.solved_estimate, dpw.mdp, sp, d-1))
+        q = r + discount(dpw.mdp)*maximum(MCTS.estimate_q_value(dpw.solved_estimate, dpw.mdp, sp, d-1))
     else
         q = r + discount(dpw.mdp)*simulate(dpw, spnode, d-1)
     end
