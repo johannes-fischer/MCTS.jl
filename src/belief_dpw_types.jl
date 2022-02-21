@@ -308,14 +308,14 @@ function BeliefDPWPlanner(solver::BeliefDPWSolver, pomdp::P) where P<:POMDP
     se = convert_estimator(solver.estimate_value, solver, pomdp)
     B = typeof(initialize_belief(solver.updater, initialstate(pomdp)))
     return BeliefDPWPlanner{P,
-                      typeof(solver.updater)
+                      typeof(solver.updater),
                       B,
                       actiontype(P),
                       typeof(se),
                       typeof(solver.next_action),
                       typeof(solver.reset_callback),
                       typeof(solver.rng)}(solver,
-                                          updater,
+                                          solver.updater,
                                           pomdp,
                                           nothing,
                                           se,
