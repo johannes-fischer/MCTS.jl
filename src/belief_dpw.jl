@@ -92,7 +92,7 @@ function simulate(dpw::BeliefDPWPlanner, snode::Int, d::Int, s, b)
     tree = dpw.tree
     # b = tree.b_labels[snode]
     # dpw.reset_callback(dpw.mdp, b) # Optional: used to reset/reinitialize MDP to a given state.
-    if isterminal(dpw.pomdp, b)
+    if isterminal(dpw.pomdp, s)
         return 0.0
     elseif d == 0
         return maximum(
