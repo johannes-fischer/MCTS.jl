@@ -1,5 +1,4 @@
 # TODO
-# 1. Implement AlphaZero UCB and do a testrun with eval script!
 # 2. Implement updater choice TrueStateMergingUpdater
 # 3. Implement sample_pw_belief=false
 
@@ -15,36 +14,34 @@ end
 """
 Construct an MCTSBeliefDPW tree and choose the best action.
 """
-POMDPs.action(p::BeliefDPWPlanner, s) = first(action_info(p, s))
+POMDPs.action(p::BeliefDPWPlanner, b) = first(action_info(p, b))
 
 """
 Construct an MCTSBeliefDPW tree and choose the best action. Also output some information.
 """
-function POMDPModelTools.action_info(p::BeliefDPWPlanner, s; tree_in_info=false)
-    local a::actiontype(p.mdp)
+function POMDPModelTools.action_info(p::BeliefDPWPlanner{P, UP, B ,A}, b; tree_in_info=false)
+    local a::actiontype(p.pomdp)
     info = Dict{Symbol, Any}()
     try
-        if isterminal(p.mdp, s)
+        if isterminal(p.pomdp, b)
             error("""
                   MCTS cannot handle terminal states. action was called with
-                  s = $s
+                  b = $b
                   """)
         end
 
-        S = statetype(p.mdp)
-        A = actiontype(p.mdp)
-        if p.solver.keep_tree && p.tree != nothing
-            tree = p.tree
-            if haskey(tree.s_lookup, s)
-                snode = tree.s_lookup[s]
-            else
-                snode = insert_state_node!(tree, s, true)
-            end
-        else
-            tree = BeliefDPWTree{S,A}(p.solver.n_iterations)
-            p.tree = tree
-            snode = insert_state_node!(tree, s, p.solver.check_repeat_state)
-        end
+        # if p.solver.keep_tree && p.tree != nothing
+        #     tree = p.tree
+        #     if haskey(tree.s_lookup, b)
+        #         snode = tree.s_lookup[b]
+        #     else
+        #         snode = insert_belief_node!(tree, b, true)
+        #     end
+        # else
+        tree = BeliefDPWTree{B,A}(p.solver.n_iterations)
+        p.tree = tree
+        bnode = insert_belief_node!(tree, b, p.solver.check_repeat_state)
+        # end
 
         timer = p.solver.timer
         p.solver.show_progress ? progress = Progress(p.solver.n_iterations) : nothing
@@ -52,24 +49,25 @@ function POMDPModelTools.action_info(p::BeliefDPWPlanner, s; tree_in_info=false)
         start_s = timer()
         for i = 1:p.solver.n_iterations
             nquery += 1
-            simulate(p, snode, p.solver.depth) # (not 100% sure we need to make a copy of the state here)
+            s = rand(p.rng, b)
+            simulate(p, bnode, p.solver.depth, s, b) # (not 100% sure we need to make a copy of the state here)
             p.solver.show_progress ? next!(progress) : nothing
             if timer() - start_s >= p.solver.max_time
                 p.solver.show_progress ? finish!(progress) : nothing
                 break
             end
         end
-        p.reset_callback(p.mdp, s) # Optional: leave the MDP in the current state.
+        p.reset_callback(p.pomdp, b) # Optional: leave the MDP in the current state.
         info[:search_time] = timer() - start_s
         info[:tree_queries] = nquery
         if p.solver.tree_in_info || tree_in_info
             info[:tree] = tree
         end
 
-        sanode = best_sanode(tree, snode)
+        sanode = best_sanode(tree, bnode)
         a = tree.a_labels[sanode] # choose action with highest approximate value
     catch ex
-        a = convert(actiontype(p.mdp), default_action(p.solver.default_action, p.mdp, s, ex))
+        a = convert(actiontype(p.pomdp), default_action(p.solver.default_action, p.pomdp, b, ex))
         info[:exception] = ex
     end
 
@@ -80,28 +78,27 @@ end
 """
 Return the reward for one iteration of MCTSBeliefDPW.
 """
-function simulate(dpw::BeliefDPWPlanner, snode::Int, d::Int)
-    # TODO: Pass state instead of state index is probably bette/necessary
-    S = statetype(dpw.mdp)
-    A = actiontype(dpw.mdp)
+function simulate(dpw::BeliefDPWPlanner, snode::Int, d::Int, s, b)
+    # S = statetype(dpw.mdp)
+    # A = actiontype(dpw.mdp)
     sol = dpw.solver
     tree = dpw.tree
-    s = tree.s_labels[snode]
-    dpw.reset_callback(dpw.mdp, s) # Optional: used to reset/reinitialize MDP to a given state.
-    if isterminal(dpw.mdp, s)
+    # b = tree.b_labels[snode]
+    # dpw.reset_callback(dpw.mdp, b) # Optional: used to reset/reinitialize MDP to a given state.
+    if isterminal(dpw.pomdp, b)
         return 0.0
     elseif d == 0
-        return maximum(MCTS.estimate_q_value(dpw.solved_estimate, dpw.mdp, s, d))
+        return maximum(MCTS.estimate_q_value(dpw.solved_estimate, dpw.pomdp, b, d))
     end
 
     # action progressive widening
     # if dpw.solver.enable_action_pw
     #     if length(tree.children[snode]) <= sol.k_action*tree.total_n[snode]^sol.alpha_action # criterion for new action generation
-    #         a = next_action(dpw.next_action, dpw.mdp, s, DPWBeliefNode(tree, snode)) # action generation step
+    #         a = next_action(dpw.next_action, dpw.mdp, b, DPWBeliefNode(tree, snode)) # action generation step
     #         if !sol.check_repeat_action || !haskey(tree.a_lookup, (snode, a))
-    #             n0 = init_N(sol.init_N, dpw.mdp, s, a)
+    #             n0 = init_N(sol.init_N, dpw.mdp, b, a)
     #             insert_action_node!(tree, snode, a, n0,
-    #                                 init_Q(sol.init_Q, dpw.mdp, s, a),
+    #                                 init_Q(sol.init_Q, dpw.mdp, b, a),
     #                                 sol.check_repeat_action
     #                                )
     #             tree.total_n[snode] += n0
@@ -109,62 +106,66 @@ function simulate(dpw::BeliefDPWPlanner, snode::Int, d::Int)
     #     end
     # else
     if isempty(tree.children[snode])
-        q_vals = MCTS.estimate_q_value(dpw.solved_estimate, dpw.mdp, s, d)
+        q_vals = MCTS.estimate_q_value(dpw.solved_estimate, dpw.pomdp, b, d)
         if d  >= solver.depth - 1
             @show q_vals
         end
-        @assert length(q_vals) == length(actions(dpw.mdp, s))
+        @assert length(q_vals) == length(actions(dpw.pomdp, b))
         prior = exp.(q_vals)
         prior /= sum(prior)
 
-        for (a, q0, p0) in zip(actions(dpw.mdp, s), q_vals, prior)
-            # n0 = init_N(sol.init_N, dpw.mdp, s, a)
+        for (a, q0, p0) in zip(actions(dpw.pomdp, b), q_vals, prior)
+            # n0 = init_N(sol.init_N, dpw.mdp, b, a)
             n0 = 1
             insert_action_node!(tree, snode, a, n0,
                 q0,
-                # init_Q(sol.init_Q, dpw.mdp, s, a),
+                # init_Q(sol.init_Q, dpw.mdp, b, a),
                 p0,
                 false)
             tree.total_n[snode] += n0
         end
     end
 
-    sanode = best_sanode_UCB(tree, snode, sol.exploration_constant)
-    a = tree.a_labels[sanode]
+    banode = best_sanode_UCB(tree, snode, sol.exploration_constant)
+    a = tree.a_labels[banode]
+
+    # new
+    sp, r, o = @gen(:sp, :r, :o)(dpw.pomdp, s, a, dpw.rng)
+    bp = update(dpw.updater, b, a, o)
 
     # state progressive widening
     new_node = false
-    if (dpw.solver.enable_state_pw && tree.n_a_children[sanode] <= sol.k_state*tree.n[sanode]^sol.alpha_state) || tree.n_a_children[sanode] == 0
-        sp, r = @gen(:sp, :r)(dpw.mdp, s, a, dpw.rng)
+    if (dpw.solver.enable_state_pw && tree.n_a_children[banode] <= sol.k_state*tree.n[banode]^sol.alpha_state) || tree.n_a_children[banode] == 0
+        # sp, r = @gen(:sp, :r)(dpw.pomdp, b, a, dpw.rng)
 
-        if sol.check_repeat_state && haskey(tree.s_lookup, sp)
-            spnode = tree.s_lookup[sp]
-        else
-            spnode = insert_state_node!(tree, sp, sol.keep_tree || sol.check_repeat_state)
-            new_node = true
-        end
+        # if sol.check_repeat_state && haskey(tree.b_lookup, sp)
+        #     spnode = tree.b_lookup[sp]
+        # else
+        bpnode = insert_belief_node!(tree, bp, sol.keep_tree || sol.check_repeat_state)
+        new_node = true
+        # end
 
-        push!(tree.transitions[sanode], (spnode, r))
+        push!(tree.transitions[banode], (bpnode, r))
 
         if !sol.check_repeat_state
-            tree.n_a_children[sanode] += 1
-        elseif !((sanode,spnode) in tree.unique_transitions)
-            push!(tree.unique_transitions, (sanode,spnode))
-            tree.n_a_children[sanode] += 1
+            tree.n_a_children[banode] += 1
+        elseif !((banode,bpnode) in tree.unique_transitions)
+            push!(tree.unique_transitions, (banode,bpnode))
+            tree.n_a_children[banode] += 1
         end
     else
-        spnode, r = rand(dpw.rng, tree.transitions[sanode])
+        bpnode, r = rand(dpw.rng, tree.transitions[banode])
     end
 
     if new_node
-        q = r + discount(dpw.mdp)*maximum(MCTS.estimate_q_value(dpw.solved_estimate, dpw.mdp, sp, d-1))
+        q = r + discount(dpw.pomdp)*maximum(MCTS.estimate_q_value(dpw.solved_estimate, dpw.pomdp, bp, d-1))
     else
-        q = r + discount(dpw.mdp)*simulate(dpw, spnode, d-1)
+        q = r + discount(dpw.pomdp)*simulate(dpw, bpnode, d-1, sp, bp)
     end
 
-    tree.n[sanode] += 1
+    tree.n[banode] += 1
     tree.total_n[snode] += 1
-    tree.q[sanode] += (q - tree.q[sanode])/tree.n[sanode]
+    tree.q[banode] += (q - tree.q[banode])/tree.n[banode]
 
     return q
 end

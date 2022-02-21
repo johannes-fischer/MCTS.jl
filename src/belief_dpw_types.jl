@@ -101,6 +101,7 @@ Fields:
         Timekeeping method. Search iterations ended when `timer() - start_time ≥ max_time`.
 """
 mutable struct BeliefDPWSolver <: AbstractMCTSSolver
+    updater::Updater
     depth::Int
     exploration_constant::Float64
     n_iterations::Int
@@ -132,56 +133,59 @@ end
 
 Use keyword arguments to specify values for the fields
 """
-function BeliefDPWSolver(; depth::Int=10,
-  exploration_constant::Float64=1.0,
-  n_iterations::Int=100,
-  max_time::Float64=Inf,
-  k_action::Float64=10.0,
-  alpha_action::Float64=0.5,
-  k_state::Float64=10.0,
-  alpha_state::Float64=0.5,
-  keep_tree::Bool=false,
-  enable_action_pw::Bool=true,
-  enable_state_pw::Bool=true,
-  check_repeat_state::Bool=true,
-  check_repeat_action::Bool=true,
-  sample_pw_belief::Bool=true,
-  tree_in_info::Bool=false,
-  rng::AbstractRNG=Random.GLOBAL_RNG,
-  estimate_value::Any=(args...)->error("estimate_value has no default value"),
-  init_Q::Any=0.0,
-  init_N::Any=0,
-  next_action::Any=RandomActionGenerator(rng),
-  default_action::Any=ExceptionRethrow(),
-  reset_callback::Function=(mdp, s) -> false,
-  show_progress::Bool=false,
-  timer=() -> 1e-9 * time_ns())
-  BeliefDPWSolver(
-    depth,
-    exploration_constant,
-    n_iterations,
-    max_time,
-    k_action,
-    alpha_action,
-    k_state,
-    alpha_state,
-    keep_tree,
-    enable_action_pw,
-    enable_state_pw,
-    check_repeat_state,
-    check_repeat_action,
-    sample_pw_belief,
-    tree_in_info,
-    rng,
-    estimate_value,
-    init_Q,
-    init_N,
-    next_action,
-    default_action,
-    reset_callback,
-    show_progress,
-    timer,
-  )
+function BeliefDPWSolver(;
+    updater::Updater,
+    depth::Int=10,
+    exploration_constant::Float64=1.0,
+    n_iterations::Int=100,
+    max_time::Float64=Inf,
+    k_action::Float64=10.0,
+    alpha_action::Float64=0.5,
+    k_state::Float64=10.0,
+    alpha_state::Float64=0.5,
+    keep_tree::Bool=false,
+    enable_action_pw::Bool=true,
+    enable_state_pw::Bool=true,
+    check_repeat_state::Bool=true,
+    check_repeat_action::Bool=true,
+    sample_pw_belief::Bool=true,
+    tree_in_info::Bool=false,
+    rng::AbstractRNG=Random.GLOBAL_RNG,
+    estimate_value::Any=(args...)->error("estimate_value has no default value"),
+    init_Q::Any=0.0,
+    init_N::Any=0,
+    next_action::Any=RandomActionGenerator(rng),
+    default_action::Any=ExceptionRethrow(),
+    reset_callback::Function=(mdp, s) -> false,
+    show_progress::Bool=false,
+    timer=() -> 1e-9 * time_ns())
+    BeliefDPWSolver(
+        updater,
+        depth,
+        exploration_constant,
+        n_iterations,
+        max_time,
+        k_action,
+        alpha_action,
+        k_state,
+        alpha_state,
+        keep_tree,
+        enable_action_pw,
+        enable_state_pw,
+        check_repeat_state,
+        check_repeat_action,
+        sample_pw_belief,
+        tree_in_info,
+        rng,
+        estimate_value,
+        init_Q,
+        init_N,
+        next_action,
+        default_action,
+        reset_callback,
+        show_progress,
+        timer,
+    )
 end
 
 #=
@@ -205,12 +209,12 @@ mutable struct DPWStateNode{S,A} <: AbstractStateNode
 end
 =#
 
-mutable struct BeliefDPWTree{S,A}
+mutable struct BeliefDPWTree{B,A}
     # for each state node
     total_n::Vector{Int}
     children::Vector{Vector{Int}}
-    s_labels::Vector{S}
-    s_lookup::Dict{S, Int}
+    b_labels::Vector{B}
+    b_lookup::Dict{B, Int}
 
     # for each state-action node
     n::Vector{Int}
@@ -225,12 +229,12 @@ mutable struct BeliefDPWTree{S,A}
     unique_transitions::Set{Tuple{Int,Int}}
 
 
-    function BeliefDPWTree{S,A}(sz::Int=1000) where {S,A}
+    function BeliefDPWTree{B,A}(sz::Int=1000) where {B,A}
         sz = min(sz, 100_000)
         return new(sizehint!(Int[], sz),
                    sizehint!(Vector{Int}[], sz),
-                   sizehint!(S[], sz),
-                   Dict{S, Int}(),
+                   sizehint!(B[], sz),
+                   Dict{B, Int}(),
 
                    sizehint!(Int[], sz),
                    sizehint!(Float64[], sz),
@@ -246,31 +250,31 @@ mutable struct BeliefDPWTree{S,A}
 end
 
 
-function insert_state_node!(tree::BeliefDPWTree{S,A}, s::S, maintain_s_lookup=true) where {S,A}
+function insert_belief_node!(tree::BeliefDPWTree{B,A}, b::B, maintain_s_lookup=true) where {B,A}
     push!(tree.total_n, 0)
     push!(tree.children, Int[])
-    push!(tree.s_labels, s)
+    push!(tree.b_labels, b)
     snode = length(tree.total_n)
     if maintain_s_lookup
-        tree.s_lookup[s] = snode
+        tree.b_lookup[b] = snode
     end
     return snode
 end
 
 
-function insert_action_node!(tree::BeliefDPWTree{S,A}, snode::Int, a::A, n0::Int, q0::Float64, p0::Float64, maintain_a_lookup=true) where {S,A}
+function insert_action_node!(tree::BeliefDPWTree{B,A}, snode::Int, a::A, n0::Int, q0::Float64, p0::Float64, maintain_a_lookup=true) where {B,A}
     push!(tree.n, n0)
     push!(tree.q, q0)
     push!(tree.prior, p0)
     push!(tree.a_labels, a)
     push!(tree.transitions, Vector{Tuple{Int,Float64}}[])
-    sanode = length(tree.n)
-    push!(tree.children[snode], sanode)
+    banode = length(tree.n)
+    push!(tree.children[snode], banode)
     push!(tree.n_a_children, 0)
     if maintain_a_lookup
-        tree.a_lookup[(snode, a)] = sanode
+        tree.a_lookup[(snode, a)] = banode
     end
-    return sanode
+    return banode
 end
 
 Base.isempty(tree::BeliefDPWTree) = isempty(tree.n) && isempty(tree.q)
@@ -285,10 +289,11 @@ Base.isempty(tree::BeliefDPWTree) = isempty(tree.n) && isempty(tree.q)
 # isroot(n::DPWBeliefNode) = n.index == 1
 
 
-mutable struct BeliefDPWPlanner{P<:Union{MDP,POMDP}, S, A, SE, NA, RCB, RNG} <: AbstractMCTSPlanner{P}
+mutable struct BeliefDPWPlanner{P<:POMDP, UP, B, A, SE, NA, RCB, RNG} <: AbstractMCTSPlanner{P}
     solver::BeliefDPWSolver
-    mdp::P
-    tree::Union{Nothing, BeliefDPWTree{S,A}}
+    updater::UP
+    pomdp::P
+    tree::Union{Nothing, BeliefDPWTree{B,A}}
     solved_estimate::SE
     next_action::NA
     reset_callback::RCB
@@ -296,16 +301,19 @@ mutable struct BeliefDPWPlanner{P<:Union{MDP,POMDP}, S, A, SE, NA, RCB, RNG} <: 
 end
 
 
-function BeliefDPWPlanner(solver::BeliefDPWSolver, mdp::P) where P<:Union{POMDP,MDP}
-    se = convert_estimator(solver.estimate_value, solver, mdp)
+function BeliefDPWPlanner(solver::BeliefDPWSolver, pomdp::P) where P<:POMDP
+    se = convert_estimator(solver.estimate_value, solver, pomdp)
+    B = typeof(initialize_belief(solver.updater, initialstate(pomdp)))
     return BeliefDPWPlanner{P,
-                      statetype(P),
+                      typeof(solver.updater)
+                      B,
                       actiontype(P),
                       typeof(se),
                       typeof(solver.next_action),
                       typeof(solver.reset_callback),
                       typeof(solver.rng)}(solver,
-                                          mdp,
+                                          updater,
+                                          pomdp,
                                           nothing,
                                           se,
                                           solver.next_action,
