@@ -2,7 +2,8 @@
 # 2. Implement updater choice TrueStateMergingUpdater
 # 3. Implement sample_pw_belief=false
 
-POMDPs.solve(solver::BeliefDPWSolver, mdp::Union{POMDP,MDP}) = BeliefDPWPlanner(solver, mdp)
+POMDPs.solve(solver::BeliefDPWSolver, mdp::Union{POMDP, MDP}) =
+    BeliefDPWPlanner(solver, mdp)
 
 """
 Delete existing decision tree.
@@ -19,7 +20,11 @@ POMDPs.action(p::BeliefDPWPlanner, b) = first(action_info(p, b))
 """
 Construct an MCTSBeliefDPW tree and choose the best action. Also output some information.
 """
-function POMDPModelTools.action_info(p::BeliefDPWPlanner{P, UP, B ,A}, b; tree_in_info=false)
+function POMDPModelTools.action_info(
+    p::BeliefDPWPlanner{P, UP, B, A},
+    b;
+    tree_in_info=false,
+) where {P, UP, B, A}
     local a::actiontype(p.pomdp)
     info = Dict{Symbol, Any}()
     try
@@ -38,7 +43,7 @@ function POMDPModelTools.action_info(p::BeliefDPWPlanner{P, UP, B ,A}, b; tree_i
         #         snode = insert_belief_node!(tree, b, true)
         #     end
         # else
-        tree = BeliefDPWTree{B,A}(p.solver.n_iterations)
+        tree = BeliefDPWTree{B, A}(p.solver.n_iterations)
         p.tree = tree
         bnode = insert_belief_node!(tree, b, p.solver.check_repeat_state)
         # end
@@ -47,7 +52,7 @@ function POMDPModelTools.action_info(p::BeliefDPWPlanner{P, UP, B ,A}, b; tree_i
         p.solver.show_progress ? progress = Progress(p.solver.n_iterations) : nothing
         nquery = 0
         start_s = timer()
-        for i = 1:p.solver.n_iterations
+        for i in 1:p.solver.n_iterations
             nquery += 1
             s = rand(p.rng, b)
             simulate(p, bnode, p.solver.depth, s, b) # (not 100% sure we need to make a copy of the state here)
@@ -67,13 +72,15 @@ function POMDPModelTools.action_info(p::BeliefDPWPlanner{P, UP, B ,A}, b; tree_i
         sanode = best_sanode(tree, bnode)
         a = tree.a_labels[sanode] # choose action with highest approximate value
     catch ex
-        a = convert(actiontype(p.pomdp), default_action(p.solver.default_action, p.pomdp, b, ex))
+        a = convert(
+            actiontype(p.pomdp),
+            default_action(p.solver.default_action, p.pomdp, b, ex),
+        )
         info[:exception] = ex
     end
 
     return a, info
 end
-
 
 """
 Return the reward for one iteration of MCTSBeliefDPW.
@@ -135,7 +142,10 @@ function simulate(dpw::BeliefDPWPlanner, snode::Int, d::Int, s, b)
 
     # state progressive widening
     new_node = false
-    if (dpw.solver.enable_state_pw && tree.n_a_children[banode] <= sol.k_state*tree.n[banode]^sol.alpha_state) || tree.n_a_children[banode] == 0
+    if (
+        dpw.solver.enable_state_pw &&
+        tree.n_a_children[banode] <= sol.k_state * tree.n[banode]^sol.alpha_state
+    ) || tree.n_a_children[banode] == 0
         # sp, r = @gen(:sp, :r)(dpw.pomdp, b, a, dpw.rng)
 
         # if sol.check_repeat_state && haskey(tree.b_lookup, sp)
@@ -149,8 +159,8 @@ function simulate(dpw::BeliefDPWPlanner, snode::Int, d::Int, s, b)
 
         if !sol.check_repeat_state
             tree.n_a_children[banode] += 1
-        elseif !((banode,bpnode) in tree.unique_transitions)
-            push!(tree.unique_transitions, (banode,bpnode))
+        elseif !((banode, bpnode) in tree.unique_transitions)
+            push!(tree.unique_transitions, (banode, bpnode))
             tree.n_a_children[banode] += 1
         end
     else
@@ -165,11 +175,10 @@ function simulate(dpw::BeliefDPWPlanner, snode::Int, d::Int, s, b)
 
     tree.n[banode] += 1
     tree.total_n[snode] += 1
-    tree.q[banode] += (q - tree.q[banode])/tree.n[banode]
+    tree.q[banode] += (q - tree.q[banode]) / tree.n[banode]
 
     return q
 end
-
 
 """
 Return the best action.
@@ -203,7 +212,7 @@ function best_sanode_UCB(tree::BeliefDPWTree, snode::Int, c::Float64)
         if c == 0.0
             UCB = q
         else
-            UCB = q + c*p*sqrtN/(1+n)
+            UCB = q + c * p * sqrtN / (1 + n)
         end
         @assert !isnan(UCB) "UCB was NaN (q=$q, c=$c, p=$p, ltn=$sqrtN, n=$n)"
         @assert !isequal(UCB, -Inf)
