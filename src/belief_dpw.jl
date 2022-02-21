@@ -95,7 +95,14 @@ function simulate(dpw::BeliefDPWPlanner, snode::Int, d::Int, s, b)
     if isterminal(dpw.pomdp, b)
         return 0.0
     elseif d == 0
-        return maximum(MCTS.estimate_q_value(dpw.solved_estimate, dpw.pomdp, b, d))
+        return maximum(
+            MCTS.estimate_q_value(
+                dpw.solved_estimate,
+                GenerativeBeliefMDP(dpw.pomdp, dpw.updater),
+                b,
+                d,
+            ),
+        )
     end
 
     # action progressive widening
@@ -113,8 +120,13 @@ function simulate(dpw::BeliefDPWPlanner, snode::Int, d::Int, s, b)
     #     end
     # else
     if isempty(tree.children[snode])
-        q_vals = MCTS.estimate_q_value(dpw.solved_estimate, dpw.pomdp, b, d)
-        if d  >= dpw.solver.depth - 1
+        q_vals = MCTS.estimate_q_value(
+            dpw.solved_estimate,
+            GenerativeBeliefMDP(dpw.pomdp, dpw.updater),
+            b,
+            d,
+        )
+        if d >= dpw.solver.depth - 1
             @show q_vals
         end
         @assert length(q_vals) == length(actions(dpw.pomdp, b))
@@ -168,10 +180,19 @@ function simulate(dpw::BeliefDPWPlanner, snode::Int, d::Int, s, b)
     end
 
     if new_node
-        q = r + discount(dpw.pomdp)*maximum(MCTS.estimate_q_value(dpw.solved_estimate, dpw.pomdp, bp, d-1))
+        future =
+            discount(dpw.pomdp) * maximum(
+                MCTS.estimate_q_value(dpw.solved_estimate,
+                    GenerativeBeliefMDP(dpw.pomdp, dpw.updater), bp, d - 1),
+            )
+        # if future > 0.55
+        #     @show future
+        #     @show bp.driver_types
+        # end
     else
-        q = r + discount(dpw.pomdp)*simulate(dpw, bpnode, d-1, sp, bp)
+        future = discount(dpw.pomdp) * simulate(dpw, bpnode, d - 1, sp, bp)
     end
+    q = r + future
 
     tree.n[banode] += 1
     tree.total_n[snode] += 1
