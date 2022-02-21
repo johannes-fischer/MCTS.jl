@@ -110,7 +110,7 @@ function simulate(dpw::BeliefDPWPlanner, snode::Int, d::Int)
     # else
     if isempty(tree.children[snode])
         q_vals = MCTS.estimate_q_value(dpw.solved_estimate, dpw.mdp, s, d)
-        if d  >= solver.depth - 1
+        if d  >= dpw.solver.depth - 1
             @show q_vals
         end
         @assert length(q_vals) == length(actions(dpw.mdp, s))
