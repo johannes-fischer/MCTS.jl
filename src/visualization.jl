@@ -270,11 +270,11 @@ function D3Trees.D3Tree(tree::BeliefDPWTree; title="MCTS-DPW Tree", kwargs...)
                             %25s
                             N: %6d
                             """,
-                            node_tag(tree.s_labels[s]),
+                            node_tag(tree.b_labels[s]),
                             tree.total_n[s]
                            )
         tt[s] = """
-                $(tooltip_tag(tree.s_labels[s]))
+                $(tooltip_tag(tree.b_labels[s]))
                 N: $(tree.total_n[s])
                 """
         for sa in tree.children[s]
