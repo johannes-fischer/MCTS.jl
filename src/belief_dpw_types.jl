@@ -220,6 +220,7 @@ mutable struct BeliefDPWTree{B,A}
     n::Vector{Int}
     q::Vector{Float64}
     prior::Vector{Float64}
+    q_init::Vector{Float64}
     transitions::Vector{Vector{Tuple{Int,Float64}}}
     a_labels::Vector{A}
     a_lookup::Dict{Tuple{Int,A}, Int}
@@ -237,6 +238,7 @@ mutable struct BeliefDPWTree{B,A}
                    Dict{B, Int}(),
 
                    sizehint!(Int[], sz),
+                   sizehint!(Float64[], sz),
                    sizehint!(Float64[], sz),
                    sizehint!(Float64[], sz),
                    sizehint!(Vector{Tuple{Int,Float64}}[], sz),
@@ -266,6 +268,7 @@ function insert_action_node!(tree::BeliefDPWTree{B,A}, snode::Int, a::A, n0::Int
     push!(tree.n, n0)
     push!(tree.q, q0)
     push!(tree.prior, p0)
+    push!(tree.q_init, q0)
     push!(tree.a_labels, a)
     push!(tree.transitions, Vector{Tuple{Int,Float64}}[])
     banode = length(tree.n)

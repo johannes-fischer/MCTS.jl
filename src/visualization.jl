@@ -250,3 +250,84 @@ function D3Trees.D3Tree(tree::DPWTree; title="MCTS-DPW Tree", kwargs...)
                   kwargs...
                  )
 end
+
+
+function D3Trees.D3Tree(tree::BeliefDPWTree; title="MCTS-DPW Tree", kwargs...)
+    lens = length(tree.total_n)
+    lensa = length(tree.n)
+    len = lens + lensa
+    children = Vector{Vector{Int}}(undef, len)
+    text = Vector{String}(undef, len)
+    tt = fill("", len)
+    style = fill("", len)
+    link_style = fill("", len)
+    max_q = maximum(tree.q)
+    min_q = minimum(tree.q)
+
+    for s in 1:lens
+        children[s] = tree.children[s] .+ lens
+        text[s] =  @sprintf("""
+                            %25s
+                            N: %6d
+                            """,
+                            node_tag(tree.s_labels[s]),
+                            tree.total_n[s]
+                           )
+        tt[s] = """
+                $(tooltip_tag(tree.s_labels[s]))
+                N: $(tree.total_n[s])
+                """
+        for sa in tree.children[s]
+            w = 20.0*sqrt(tree.n[sa]/tree.total_n[s])
+            link_style[sa+lens] = "stroke-width:$(w)px"
+        end
+    end
+    for sa in 1:lensa
+        children[sa+lens] = let
+            sp_children = if !isempty(tree.unique_transitions)
+                last.(filter(((sanode, spnode),) -> sanode == sa, tree.unique_transitions))
+            else
+                first.(tree.transitions[sa])
+            end
+            @assert length(sp_children) == tree.n_a_children[sa]
+            collect(sp_children)
+        end
+
+        text[sa+lens] = @sprintf("""
+                                 %25s
+                                 Q: %6.2f
+                                 p: %6.2f
+                                 N: %6d
+                                 Q_init: %6.2f
+                                 """,
+            node_tag(tree.a_labels[sa]),
+            tree.q[sa],
+            tree.prior[sa],
+            tree.n[sa],
+            tree.q_init[sa],
+        )
+        tt[sa+lens] = """
+                      $(tooltip_tag(tree.a_labels[sa]))
+                      Q: $(tree.q[sa])
+                      p: $(tree.prior[sa])
+                      N: $(tree.n[sa])
+                      Q_init: $(tree.q_init[sa])
+                      """
+
+        rel_q = (tree.q[sa] - min_q) / (max_q - min_q)
+        if isnan(rel_q)
+            color = colorant"gray"
+        else
+            color = weighted_color_mean(rel_q, colorant"green", colorant"red")
+        end
+        style[sa+lens] = "stroke:#$(hex(color))"
+    end
+    return D3Tree(children;
+                  text=text,
+                  tooltip=tt,
+                  style=style,
+                  link_style=link_style,
+                  title=title,
+                  kwargs...
+                 )
+end
