@@ -104,6 +104,7 @@ mutable struct BeliefDPWSolver <: AbstractMCTSSolver
     updater::Updater
     depth::Int
     exploration_constant::Float64
+    ucb::Symbol
     n_iterations::Int
     max_time::Float64
     k_action::Float64
@@ -137,6 +138,7 @@ function BeliefDPWSolver(;
     updater::Updater,
     depth::Int=10,
     exploration_constant::Float64=1.0,
+    ucb::Symbol=:ucb,
     n_iterations::Int=100,
     max_time::Float64=Inf,
     k_action::Float64=10.0,
@@ -163,6 +165,7 @@ function BeliefDPWSolver(;
         updater,
         depth,
         exploration_constant,
+        ucb,
         n_iterations,
         max_time,
         k_action,

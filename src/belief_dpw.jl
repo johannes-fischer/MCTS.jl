@@ -145,7 +145,13 @@ function simulate(dpw::BeliefDPWPlanner, snode::Int, d::Int, s, b)
         end
     end
 
-    banode = best_sanode_UCB(tree, snode, sol.exploration_constant)
+    if dpw.solver.ucb == :ucb
+        banode = best_sanode_UCB(tree, snode, sol.exploration_constant)
+    elseif dpw.solver.ucb == :ucb2
+        banode = best_sanode_UCB2(tree, snode, sol.exploration_constant)
+    else
+        @error "Unrecognized UCB variant $(dpw.solver.ucb)"
+    end
     a = tree.a_labels[banode]
 
     # new
@@ -222,7 +228,7 @@ end
 """
 Return the best action node based on an alternative UCB score used in AlphaZero with exploration constant c
 """
-function best_sanode_UCB(tree::BeliefDPWTree, snode::Int, c::Float64)
+function best_sanode_UCB2(tree::BeliefDPWTree, snode::Int, c::Float64)
     best_UCB = -Inf
     sanode = 0
     sqrtN = sqrt(tree.total_n[snode])
@@ -236,6 +242,31 @@ function best_sanode_UCB(tree::BeliefDPWTree, snode::Int, c::Float64)
             UCB = q + c * p * sqrtN / (1 + n)
         end
         @assert !isnan(UCB) "UCB was NaN (q=$q, c=$c, p=$p, ltn=$sqrtN, n=$n)"
+        @assert !isequal(UCB, -Inf)
+        if UCB > best_UCB
+            best_UCB = UCB
+            sanode = child
+        end
+    end
+    return sanode
+end
+
+"""
+Return the best action node based on the UCB score with exploration constant c
+"""
+function best_sanode_UCB(tree::BeliefDPWTree, snode::Int, c::Float64)
+    best_UCB = -Inf
+    sanode = 0
+    ltn = log(tree.total_n[snode])
+    for child in tree.children[snode]
+        n = tree.n[child]
+        q = tree.q[child]
+        if (ltn <= 0 && n == 0) || c == 0.0
+            UCB = q
+        else
+            UCB = q + c * sqrt(ltn / n)
+        end
+        @assert !isnan(UCB) "UCB was NaN (q=$q, c=$c, ltn=$ltn, n=$n)"
         @assert !isequal(UCB, -Inf)
         if UCB > best_UCB
             best_UCB = UCB
