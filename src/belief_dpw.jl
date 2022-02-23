@@ -126,9 +126,9 @@ function simulate(dpw::BeliefDPWPlanner, snode::Int, d::Int, s, b)
             b,
             d,
         )
-        if d >= dpw.solver.depth - 1
-            @show q_vals
-        end
+        # if d >= dpw.solver.depth - 1
+        #     @show q_vals
+        # end
         @assert length(q_vals) == length(actions(dpw.pomdp, b))
         prior = exp.(q_vals)
         prior /= sum(prior)
