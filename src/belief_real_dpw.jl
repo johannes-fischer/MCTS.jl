@@ -1,23 +1,27 @@
-POMDPs.solve(solver::BeliefDPWSolver, mdp::Union{POMDP, MDP}) =
-    BeliefDPWPlanner(solver, mdp)
+# TODO
+# 2. Implement updater choice TrueStateMergingUpdater
+# 3. Implement sample_pw_belief=false
+
+POMDPs.solve(solver::BeliefRealDPWSolver, mdp::Union{POMDP, MDP}) =
+    BeliefRealDPWPlanner(solver, mdp)
 
 """
 Delete existing decision tree.
 """
-function clear_tree!(p::BeliefDPWPlanner)
+function clear_tree!(p::BeliefRealDPWPlanner)
     p.tree = nothing
 end
 
 """
-Construct an MCTSBeliefDPW tree and choose the best action.
+Construct an MCTSBeliefRealDPW tree and choose the best action.
 """
-POMDPs.action(p::BeliefDPWPlanner, b) = first(action_info(p, b))
+POMDPs.action(p::BeliefRealDPWPlanner, b) = first(action_info(p, b))
 
 """
-Construct an MCTSBeliefDPW tree and choose the best action. Also output some information.
+Construct an MCTSBeliefRealDPW tree and choose the best action. Also output some information.
 """
 function POMDPModelTools.action_info(
-    p::BeliefDPWPlanner{P, UP, B, A},
+    p::BeliefRealDPWPlanner{P, UP, B, A},
     b;
     tree_in_info=false,
 ) where {P, UP, B, A}
@@ -39,7 +43,7 @@ function POMDPModelTools.action_info(
         #         snode = insert_belief_node!(tree, b, true)
         #     end
         # else
-        tree = BeliefDPWTree{B, A}(p.solver.n_iterations)
+        tree = BeliefRealDPWTree{B, A}(p.solver.n_iterations)
         p.tree = tree
         bnode = insert_belief_node!(tree, b, p.solver.check_repeat_state)
         # end
@@ -85,9 +89,9 @@ function POMDPModelTools.action_info(
 end
 
 """
-Return the reward for one iteration of MCTSBeliefDPW.
+Return the reward for one iteration of MCTSBeliefRealDPW.
 """
-function simulate(dpw::BeliefDPWPlanner, snode::Int, d::Int, s, b)
+function simulate(dpw::BeliefRealDPWPlanner, snode::Int, d::Int, s, b)
     # S = statetype(dpw.mdp)
     # A = actiontype(dpw.mdp)
     sol = dpw.solver
@@ -107,20 +111,6 @@ function simulate(dpw::BeliefDPWPlanner, snode::Int, d::Int, s, b)
         )
     end
 
-    # action progressive widening
-    # if dpw.solver.enable_action_pw
-    #     if length(tree.children[snode]) <= sol.k_action*tree.total_n[snode]^sol.alpha_action # criterion for new action generation
-    #         a = next_action(dpw.next_action, dpw.mdp, b, DPWBeliefNode(tree, snode)) # action generation step
-    #         if !sol.check_repeat_action || !haskey(tree.a_lookup, (snode, a))
-    #             n0 = init_N(sol.init_N, dpw.mdp, b, a)
-    #             insert_action_node!(tree, snode, a, n0,
-    #                                 init_Q(sol.init_Q, dpw.mdp, b, a),
-    #                                 sol.check_repeat_action
-    #                                )
-    #             tree.total_n[snode] += n0
-    #         end
-    #     end
-    # else
     if isempty(tree.children[snode])
         q_vals = MCTS.estimate_q_value(
             dpw.solved_estimate,
@@ -150,16 +140,11 @@ function simulate(dpw::BeliefDPWPlanner, snode::Int, d::Int, s, b)
     # if dpw.solver.ucb == :ucb
     #     banode = best_sanode_UCB(tree, snode, sol.exploration_constant)
     # elseif dpw.solver.ucb == :ucb2
-    # banode = best_sanode_UCB2(tree, snode, sol.exploration_constant)
     banode = best_sanode(dpw.ucb, tree, snode)
     # else
     #     @error "Unrecognized UCB variant $(dpw.solver.ucb)"
     # end
     a = tree.a_labels[banode]
-
-    # new
-    sp, r, o = @gen(:sp, :r, :o)(dpw.pomdp, s, a, dpw.rng)
-    bp = update(dpw.updater, b, a, o)
 
     # state progressive widening
     new_node = false
@@ -167,7 +152,9 @@ function simulate(dpw::BeliefDPWPlanner, snode::Int, d::Int, s, b)
         dpw.solver.enable_state_pw &&
         tree.n_a_children[banode] <= sol.k_state * tree.n[banode]^sol.alpha_state
     ) || tree.n_a_children[banode] == 0
-        # sp, r = @gen(:sp, :r)(dpw.pomdp, b, a, dpw.rng)
+        # new
+        sp, r, o = @gen(:sp, :r, :o)(dpw.pomdp, s, a, dpw.rng)
+        bp = update(dpw.updater, b, a, o)
 
         # if sol.check_repeat_state && haskey(tree.b_lookup, sp)
         #     spnode = tree.b_lookup[sp]
@@ -186,6 +173,8 @@ function simulate(dpw::BeliefDPWPlanner, snode::Int, d::Int, s, b)
         end
     else
         bpnode, r = rand(dpw.rng, tree.transitions[banode])
+        bp = tree.b_labels[bpnode]
+        sp = rand(dpw.rng, bp)
     end
 
     if new_node
@@ -206,83 +195,81 @@ function simulate(dpw::BeliefDPWPlanner, snode::Int, d::Int, s, b)
     return q
 end
 
-"""
-Return the best action.
+# """
+# Return the best action.
 
-Some publications say to choose action that has been visited the most
-e.g., Continuous Upper Confidence Trees by Couëtoux et al.
-"""
-function best_sanode(::MaxQ, tree::Union{BeliefDPWTree,BeliefRealDPWTree}, snode::Int)
-    best_Q = -Inf
-    sanode = 0
-    for child in tree.children[snode]
-        if tree.q[child] > best_Q
-            best_Q = tree.q[child]
-            sanode = child
-        end
-    end
-    return sanode
-end
+# Some publications say to choose action that has been visited the most
+# e.g., Continuous Upper Confidence Trees by Couëtoux et al.
+# """
+# function best_sanode(tree::BeliefRealDPWTree, snode::Int)
+#     best_Q = -Inf
+#     sanode = 0
+#     for child in tree.children[snode]
+#         if tree.q[child] > best_Q
+#             best_Q = tree.q[child]
+#             sanode = child
+#         end
+#     end
+#     return sanode
+# end
 
-"""
-Return the best action node based on an alternative UCB score used in AlphaZero with exploration constant c
-"""
-function best_sanode(ucb::MaxPUCB, tree::Union{BeliefDPWTree,BeliefRealDPWTree}, snode::Int)
-    c = ucb.c
-    best_UCB = -Inf
-    sanode = 0
-    sqrtN = sqrt(tree.total_n[snode])
-    for child in tree.children[snode]
-        n = tree.n[child]
-        q = tree.q[child]
-        p = tree.prior[child]
-        if c == 0.0
-            UCB = q
-        else
-            UCB = q + c * p * sqrtN / (1 + n)
-        end
-        @assert !isnan(UCB) "UCB was NaN (q=$q, c=$c, p=$p, ltn=$sqrtN, n=$n)"
-        @assert !isequal(UCB, -Inf)
-        if UCB > best_UCB
-            best_UCB = UCB
-            sanode = child
-        end
-    end
-    return sanode
-end
+# """
+# Return the best action node based on an alternative UCB score used in AlphaZero with exploration constant c
+# """
+# function best_sanode_UCB2(tree::BeliefRealDPWTree, snode::Int, c::Float64)
+#     best_UCB = -Inf
+#     sanode = 0
+#     sqrtN = sqrt(tree.total_n[snode])
+#     for child in tree.children[snode]
+#         n = tree.n[child]
+#         q = tree.q[child]
+#         p = tree.prior[child]
+#         if c == 0.0
+#             UCB = q
+#         else
+#             UCB = q + c * p * sqrtN / (1 + n)
+#         end
+#         @assert !isnan(UCB) "UCB was NaN (q=$q, c=$c, p=$p, ltn=$sqrtN, n=$n)"
+#         @assert !isequal(UCB, -Inf)
+#         if UCB > best_UCB
+#             best_UCB = UCB
+#             sanode = child
+#         end
+#     end
+#     return sanode
+# end
 
-"""
-Return the best action node based on the UCB score with exploration constant c
-"""
-function best_sanode(ucb::MaxUCB, tree::Union{BeliefDPWTree,BeliefRealDPWTree}, snode::Int)
-    c = ucb.c
-    best_UCB = -Inf
-    sanode = 0
-    ltn = log(tree.total_n[snode])
-    for child in tree.children[snode]
-        n = tree.n[child]
-        q = tree.q[child]
-        if (ltn <= 0 && n == 0) || c == 0.0
-            UCB = q
-        else
-            UCB = q + c * sqrt(ltn / n)
-        end
-        @assert !isnan(UCB) "UCB was NaN (q=$q, c=$c, ltn=$ltn, n=$n)"
-        @assert !isequal(UCB, -Inf)
-        if UCB > best_UCB
-            best_UCB = UCB
-            sanode = child
-        end
-    end
-    return sanode
-end
+# """
+# Return the best action node based on the UCB score with exploration constant c
+# """
+# function best_sanode_UCB(tree::BeliefRealDPWTree, snode::Int, c::Float64)
+#     best_UCB = -Inf
+#     sanode = 0
+#     ltn = log(tree.total_n[snode])
+#     for child in tree.children[snode]
+#         n = tree.n[child]
+#         q = tree.q[child]
+#         if (ltn <= 0 && n == 0) || c == 0.0
+#             UCB = q
+#         else
+#             UCB = q + c * sqrt(ltn / n)
+#         end
+#         @assert !isnan(UCB) "UCB was NaN (q=$q, c=$c, ltn=$ltn, n=$n)"
+#         @assert !isequal(UCB, -Inf)
+#         if UCB > best_UCB
+#             best_UCB = UCB
+#             sanode = child
+#         end
+#     end
+#     return sanode
+# end
 
-# function best_sanode_max_action(tree::BeliefDPWTree, snode::Int)
+# function best_sanode_max_action(tree::BeliefRealDPWTree, snode::Int)
 #     _, banode = belief_node_value(tree, snode)
 #     banode
 # end
 
-# function belief_node_value(tree::BeliefDPWTree, snode::Int)
+# function belief_node_value(tree::BeliefRealDPWTree, snode::Int)
 #     best_q_value = -Inf
 #     best_banode = 0
 #     for banode in tree.children[snode]
@@ -301,7 +288,7 @@ end
 #     best_q_value, best_banode
 # end
 
-# function action_node_value(tree::BeliefDPWTree, banode::Int)
+# function action_node_value(tree::BeliefRealDPWTree, banode::Int)
 #     transitions = tree.transitions[banode]
 #     if length(transitions) == 1
 #         bnode, _ = first(transitions)
@@ -320,7 +307,7 @@ end
 #     end
 # end
 
-# function best_sanode_robust(tree::BeliefDPWTree, snode::Int)
+# function best_sanode_robust(tree::BeliefRealDPWTree, snode::Int)
 #     best_N = -Inf
 #     sanode = 0
 #     for child in tree.children[snode]
