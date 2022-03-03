@@ -212,7 +212,7 @@ Return the best action.
 Some publications say to choose action that has been visited the most
 e.g., Continuous Upper Confidence Trees by Couëtoux et al.
 """
-function best_sanode(::MaxQ, tree::Union{BeliefDPWTree,BeliefRealDPWTree}, snode::Int)
+function best_sanode(::MaxQ, tree::Union{BeliefDPWTree,BeliefRealDPWTree,BasicBeliefDPWTree}, snode::Int)
     best_Q = -Inf
     sanode = 0
     for child in tree.children[snode]
@@ -254,7 +254,11 @@ end
 """
 Return the best action node based on the UCB score with exploration constant c
 """
-function best_sanode(ucb::MaxUCB, tree::Union{BeliefDPWTree,BeliefRealDPWTree}, snode::Int)
+function best_sanode(
+    ucb::MaxUCB,
+    tree::Union{BeliefDPWTree, BeliefRealDPWTree, BasicBeliefDPWTree},
+    snode::Int,
+)
     c = ucb.c
     best_UCB = -Inf
     sanode = 0

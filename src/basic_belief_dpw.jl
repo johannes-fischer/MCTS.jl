@@ -2,26 +2,26 @@
 # 2. Implement updater choice TrueStateMergingUpdater
 # 3. Implement sample_pw_belief=false
 
-POMDPs.solve(solver::BeliefRealDPWSolver, mdp::Union{POMDP, MDP}) =
-    BeliefRealDPWPlanner(solver, mdp)
+POMDPs.solve(solver::BasicBeliefDPWSolver, mdp::Union{POMDP, MDP}) =
+    BasicBeliefDPWPlanner(solver, mdp)
 
 """
 Delete existing decision tree.
 """
-function clear_tree!(p::BeliefRealDPWPlanner)
+function clear_tree!(p::BasicBeliefDPWPlanner)
     p.tree = nothing
 end
 
 """
-Construct an MCTSBeliefRealDPW tree and choose the best action.
+Construct an MCTSBasicBeliefDPW tree and choose the best action.
 """
-POMDPs.action(p::BeliefRealDPWPlanner, b) = first(action_info(p, b))
+POMDPs.action(p::BasicBeliefDPWPlanner, b) = first(action_info(p, b))
 
 """
-Construct an MCTSBeliefRealDPW tree and choose the best action. Also output some information.
+Construct an MCTSBasicBeliefDPW tree and choose the best action. Also output some information.
 """
 function POMDPModelTools.action_info(
-    p::BeliefRealDPWPlanner{P, UP, B, A},
+    p::BasicBeliefDPWPlanner{P, UP, B, A},
     b;
     tree_in_info=false,
 ) where {P, UP, B, A}
@@ -43,7 +43,7 @@ function POMDPModelTools.action_info(
         #         snode = insert_belief_node!(tree, b, true)
         #     end
         # else
-        tree = BeliefRealDPWTree{B, A}(p.solver.n_iterations)
+        tree = BasicBeliefDPWTree{B, A}(p.solver.n_iterations)
         p.tree = tree
         bnode = insert_belief_node!(tree, b, p.solver.check_repeat_state)
         # end
@@ -84,49 +84,44 @@ function POMDPModelTools.action_info(
 end
 
 """
-Return the reward for one iteration of MCTSBeliefRealDPW.
+Return the reward for one iteration of MCTSBasicBeliefDPW.
 """
-function simulate(dpw::BeliefRealDPWPlanner, snode::Int, d::Int, s, b)
-    # S = statetype(dpw.mdp)
-    # A = actiontype(dpw.mdp)
+function simulate(dpw::BasicBeliefDPWPlanner, snode::Int, d::Int, s, b)
+    # S = statetype(dpw.pomdp)
+    # A = actiontype(dpw.pomdp)
     sol = dpw.solver
     tree = dpw.tree
     # b = tree.b_labels[snode]
-    # dpw.reset_callback(dpw.mdp, b) # Optional: used to reset/reinitialize MDP to a given state.
+    # dpw.reset_callback(dpw.pomdp, b) # Optional: used to reset/reinitialize MDP to a given state.
     if isterminal(dpw.pomdp, s)
         return 0.0
     elseif d == 0
-        return maximum(
-            MCTS.estimate_q_value(
-                dpw.solved_estimate,
-                GenerativeBeliefMDP(dpw.pomdp, dpw.updater),
-                b,
-                d,
-            ),
-        )
-    end
-
-    if isempty(tree.children[snode])
-        q_vals = MCTS.estimate_q_value(
+        return estimate_value(
             dpw.solved_estimate,
             GenerativeBeliefMDP(dpw.pomdp, dpw.updater),
             b,
             d,
         )
-        # if d >= dpw.solver.depth - 1
-        #     @show q_vals
-        # end
-        @assert length(q_vals) == length(actions(dpw.pomdp, b))
-        prior = exp.(q_vals)
-        prior /= sum(prior)
+    end
 
-        for (a, q0, p0) in zip(actions(dpw.pomdp, b), q_vals, prior)
-            # n0 = init_N(sol.init_N, dpw.mdp, b, a)
-            n0 = 1
+    # action progressive widening
+    if dpw.solver.enable_action_pw
+        if length(tree.children[snode]) <= sol.k_action * tree.total_n[snode]^sol.alpha_action # criterion for new action generation
+            a = next_action(dpw.next_action, dpw.pomdp, s, DPWStateNode(tree, snode)) # action generation step
+            if !sol.check_repeat_action || !haskey(tree.a_lookup, (snode, a))
+                n0 = init_N(sol.init_N, dpw.pomdp, s, a)
+                insert_action_node!(tree, snode, a, n0,
+                    init_Q(sol.init_Q, dpw.pomdp, s, a),
+                    sol.check_repeat_action,
+                )
+                tree.total_n[snode] += n0
+            end
+        end
+    elseif isempty(tree.children[snode])
+        for a in actions(dpw.pomdp, s)
+            n0 = init_N(sol.init_N, dpw.pomdp, s, a)
             insert_action_node!(tree, snode, a, n0,
-                q0,
-                # init_Q(sol.init_Q, dpw.mdp, b, a),
-                p0,
+                init_Q(sol.init_Q, dpw.pomdp, s, a),
                 false)
             tree.total_n[snode] += n0
         end
@@ -168,9 +163,11 @@ function simulate(dpw::BeliefRealDPWPlanner, snode::Int, d::Int, s, b)
 
     if new_node
         future =
-            discount(dpw.pomdp) * maximum(
-                MCTS.estimate_q_value(dpw.solved_estimate,
-                    GenerativeBeliefMDP(dpw.pomdp, dpw.updater), bp, d - 1),
+            discount(dpw.pomdp) * estimate_value(
+                dpw.solved_estimate,
+                GenerativeBeliefMDP(dpw.pomdp, dpw.updater),
+                bp,
+                d - 1,
             )
     else
         future = discount(dpw.pomdp) * simulate(dpw, bpnode, d - 1, sp, bp)
