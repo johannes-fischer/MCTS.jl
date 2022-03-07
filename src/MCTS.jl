@@ -21,6 +21,8 @@ export
     BasicBeliefDPWPlanner,
     BeliefRealDPWSolver,
     BeliefRealDPWPlanner,
+    GenBeliefRealDPWSolver,
+    GenBeliefRealDPWPlanner,
     BeliefMCTSSolver,
     AbstractMCTSPlanner,
     AbstractMCTSSolver,
@@ -53,7 +55,7 @@ export
     DPWStateNode, ExceptionRethrow,
     ReportWhenUsed
 
-abstract type AbstractMCTSPlanner{P<:Union{MDP,POMDP}} <: Policy end
+abstract type AbstractMCTSPlanner{P <: Union{MDP, POMDP}} <: Policy end
 abstract type AbstractMCTSSolver <: Solver end
 abstract type AbstractStateNode end
 
@@ -64,9 +66,11 @@ include("dpw_types.jl")
 include("dpw.jl")
 include("belief_dpw_types.jl")
 include("belief_real_dpw_types.jl")
+include("gen_belief_real_dpw_types.jl")
 include("basic_belief_dpw_types.jl")
 include("belief_dpw.jl")
 include("belief_real_dpw.jl")
+include("gen_belief_real_dpw.jl")
 include("basic_belief_dpw.jl")
 include("action_gen.jl")
 include("util.jl")
