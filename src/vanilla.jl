@@ -25,10 +25,10 @@ Fields:
 
     estimate_value::Any (rollout policy)
         Function, object, or number used to estimate the value at the leaf nodes.
-        If this is a function `f`, `f(mdp, s, depth)` will be called to estimate the value.
-        If this is an object `o`, `estimate_value(o, mdp, s, depth)` will be called.
+        If this is a function `f`, `f(mdp, s, remaining_depth)` will be called to estimate the value (remaining_depth can be ignored).
+        If this is an object `o`, `estimate_value(o, mdp, s, remaining_depth)` will be called.
         If this is a number, the value will be set to that number
-        default: RolloutEstimator(RandomSolver(rng))
+        default: RolloutEstimator(RandomSolver(rng); max_depth=50, eps=nothing)
 
     init_Q::Any
         Function, object, or number used to set the initial Q(s,a) value at a new node.
@@ -104,7 +104,7 @@ mutable struct MCTSTree{S,A}
     q::Vector{Float64}
     a_labels::Vector{A}
 
-    _vis_stats::Union{Nothing, Dict{Pair{Int,Int}, Int}} # maps (said=>sid)=>number of transitions. THIS MAY CHANGE IN THE FUTURE
+    _vis_stats::Dict{Pair{Int,Int}, Int} # maps (said=>sid)=>number of transitions. THIS MAY CHANGE IN THE FUTURE
 
     function MCTSTree{S,A}(sz::Int=1000) where {S,A}
         sz = min(sz, 100_000)
@@ -199,7 +199,7 @@ POMDPs.solve(solver::MCTSSolver, mdp::Union{POMDP,MDP}) = MCTSPlanner(solver, md
     @subreq simulate(policy, state, policy.solver.depth)
 end
 
-function POMDPModelTools.action_info(p::AbstractMCTSPlanner, s)
+function POMDPTools.action_info(p::AbstractMCTSPlanner, s)
     tree = plan!(p, s)
     best = best_sanode_Q(StateNode(tree, s))
     return action(best), (tree=tree,)
@@ -211,7 +211,7 @@ POMDPs.action(p::AbstractMCTSPlanner, s) = first(action_info(p, s))
 Query the tree for a value estimate at state s. If the planner does not already have a tree, run the planner first.
 """
 function POMDPs.value(planner::MCTSPlanner, s)
-    if planner.tree == nothing
+    if planner.tree === nothing
         plan!(planner, s)
     end
     return value(planner.tree, s)
@@ -226,7 +226,7 @@ function POMDPs.value(tr::MCTSTree, s)
 end
 
 function POMDPs.value(planner::MCTSPlanner{<:Union{POMDP,MDP}, S, A}, s::S, a::A) where {S,A}
-    if planner.tree == nothing
+    if planner.tree === nothing
         plan!(planner, s)
     end
     return value(planner.tree, s, a)
@@ -288,8 +288,8 @@ function simulate(planner::AbstractMCTSPlanner, node::StateNode, depth::Int64)
 
     # once depth is zero return
     if isterminal(planner.mdp, s)
-	return 0.0
-    elseif depth == 0 
+        return 0.0
+    elseif depth == 0
         return estimate_value(planner.solved_estimate, planner.mdp, s, depth)
     end
 
@@ -304,9 +304,9 @@ function simulate(planner::AbstractMCTSPlanner, node::StateNode, depth::Int64)
     if spid == 0
         spn = insert_node!(tree, planner, sp)
         spid = spn.id
-        q = r + discount(mdp) * estimate_value(planner.solved_estimate, planner.mdp, sp, depth - 1)
+        q = r + discount(mdp) * estimate_value(planner.solved_estimate, planner.mdp, sp, depth-1)
     else
-        q = r + discount(mdp) * simulate(planner, StateNode(tree, spid) , depth - 1)
+        q = r + discount(mdp) * simulate(planner, StateNode(tree, spid) , depth-1)
     end
     if planner.solver.enable_tree_vis
         record_visit!(tree, said, spid)
@@ -395,28 +395,30 @@ end
 Return the best action node based on the UCB score with exploration constant c
 """
 function best_sanode_UCB(snode::StateNode, c::Float64)
+    if c==0
+        return argmax(q, children(snode))
+    end
+
     best_UCB = -Inf
     best = first(children(snode))
     sn = total_n(snode)
     for sanode in children(snode)
-	
-	# if sn==0, log(sn) = -Inf. We want to avoid this.
-        # in most cases, if n(sanode)==0, UCB will be Inf, which is desired,
-	# but if sn==1 as well, then we have 0/0, which is NaN
-        if c == 0 || sn == 0 || (sn == 1 && n(sanode) == 0)
-            UCB = q(sanode)
+        # if action was not used, use it. This also handles the case sn==0, 
+        # since sn==0 is possible only when for all available actions n(sanode)==0
+        if n(sanode) == 0
+            return sanode
         else
             UCB = q(sanode) + c*sqrt(log(sn)/n(sanode))
         end
 		
-        if isnan(UCB)
-            @show sn
-            @show n(sanode)
-            @show q(sanode)
-        end
+        # if isnan(UCB)
+        #     @show sn
+        #     @show n(sanode)
+        #     @show q(sanode)
+        # end
 		
-        @assert !isnan(UCB)
-        @assert !isequal(UCB, -Inf)
+        # @assert !isnan(UCB)
+        # @assert !isequal(UCB, -Inf)
 		
         if UCB > best_UCB
             best_UCB = UCB
