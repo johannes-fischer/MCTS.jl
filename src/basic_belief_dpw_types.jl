@@ -1,16 +1,5 @@
-struct MaxUCB
-    c::Float64
-end
-
-# prioritized USB, as used in AlphaZero
-struct MaxPUCB
-    c::Float64
-end
-
-struct MaxQ end
-
 """
-MCTS solver with DPW
+MCTS solver with RealDPW
 
 Fields:
 
@@ -86,7 +75,7 @@ Fields:
 
     next_action::Any
         Function or object used to choose the next action to be considered for progressive widening.
-        The next action is determined based on the MDP, the state, `s`, and the current `BeliefDPWStateNode`, `snode`.
+        The next action is determined based on the MDP, the state, `s`, and the current `BasicBeliefDPWStateNode`, `snode`.
         If this is a function `f`, `f(mdp, s, snode)` will be called to set the value.
         If this is an object `o`, `next_action(o, mdp, s, snode)` will be called.
         default: RandomActionGenerator(rng)
@@ -111,7 +100,7 @@ Fields:
     timer::Function:
         Timekeeping method. Search iterations ended when `timer() - start_time ≥ max_time`.
 """
-mutable struct BeliefDPWSolver <: AbstractMCTSSolver
+mutable struct BasicBeliefDPWSolver <: AbstractMCTSSolver
     updater::Updater
     depth::Int
     ucb::Any
@@ -141,11 +130,11 @@ mutable struct BeliefDPWSolver <: AbstractMCTSSolver
 end
 
 """
-    BeliefDPWSolver()
+    BasicBeliefDPWSolver()
 
 Use keyword arguments to specify values for the fields
 """
-function BeliefDPWSolver(;
+function BasicBeliefDPWSolver(;
     updater::Updater,
     depth::Int=10,
     ucb::Any=MaxUCB(1.0),
@@ -172,7 +161,7 @@ function BeliefDPWSolver(;
     reset_callback::Function=(mdp, s) -> false,
     show_progress::Bool=false,
     timer=() -> 1e-9 * time_ns())
-    BeliefDPWSolver(
+    BasicBeliefDPWSolver(
         updater,
         depth,
         ucb,
@@ -209,21 +198,21 @@ mutable struct StateActionStateNode
     StateActionStateNode() = new(0,0)
 end
 
-mutable struct DPWStateActionNode{S}
+mutable struct RealDPWStateActionNode{S}
     V::Dict{S,StateActionStateNode}
     N::Int
     Q::Float64
-    DPWStateActionNode(N,Q) = new(Dict{S,StateActionStateNode}(), N, Q)
+    RealDPWStateActionNode(N,Q) = new(Dict{S,StateActionStateNode}(), N, Q)
 end
 
-mutable struct DPWStateNode{S,A} <: AbstractStateNode
-    A::Dict{A,DPWStateActionNode{S}}
+mutable struct RealDPWStateNode{S,A} <: AbstractStateNode
+    A::Dict{A,RealDPWStateActionNode{S}}
     N::Int
-    DPWStateNode{S,A}() where {S,A} = new(Dict{A,DPWStateActionNode{S}}(),0)
+    RealDPWStateNode{S,A}() where {S,A} = new(Dict{A,RealDPWStateActionNode{S}}(),0)
 end
 =#
 
-mutable struct BeliefDPWTree{B, A}
+mutable struct BasicBeliefDPWTree{B, A}
     # for each state node
     total_n::Vector{Int}
     children::Vector{Vector{Int}}
@@ -233,8 +222,6 @@ mutable struct BeliefDPWTree{B, A}
     # for each state-action node
     n::Vector{Int}
     q::Vector{Float64}
-    prior::Vector{Float64}
-    q_init::Vector{Float64}
     transitions::Vector{Vector{Tuple{Int, Float64}}}
     a_labels::Vector{A}
     a_lookup::Dict{Tuple{Int, A}, Int}
@@ -243,14 +230,13 @@ mutable struct BeliefDPWTree{B, A}
     n_a_children::Vector{Int}
     unique_transitions::Set{Tuple{Int, Int}}
 
-    function BeliefDPWTree{B, A}(sz::Int=1000) where {B, A}
+    function BasicBeliefDPWTree{B, A}(sz::Int=1000) where {B, A}
         sz = min(sz, 100_000)
         return new(sizehint!(Int[], sz),
             sizehint!(Vector{Int}[], sz),
             sizehint!(B[], sz),
-            Dict{B, Int}(), sizehint!(Int[], sz),
-            sizehint!(Float64[], sz),
-            sizehint!(Float64[], sz),
+            Dict{B, Int}(),
+            sizehint!(Int[], sz),
             sizehint!(Float64[], sz),
             sizehint!(Vector{Tuple{Int, Float64}}[], sz),
             sizehint!(A[], sz),
@@ -261,7 +247,7 @@ mutable struct BeliefDPWTree{B, A}
 end
 
 function insert_belief_node!(
-    tree::BeliefDPWTree{B, A},
+    tree::BasicBeliefDPWTree{B, A},
     b::B,
     maintain_s_lookup=true,
 ) where {B, A}
@@ -276,18 +262,15 @@ function insert_belief_node!(
 end
 
 function insert_action_node!(
-    tree::BeliefDPWTree{B, A},
+    tree::BasicBeliefDPWTree{B, A},
     snode::Int,
     a::A,
     n0::Int,
     q0::Float64,
-    p0::Float64,
     maintain_a_lookup=true,
 ) where {B, A}
     push!(tree.n, n0)
     push!(tree.q, q0)
-    push!(tree.prior, p0)
-    push!(tree.q_init, q0)
     push!(tree.a_labels, a)
     push!(tree.transitions, Vector{Tuple{Int, Float64}}[])
     banode = length(tree.n)
@@ -299,35 +282,35 @@ function insert_action_node!(
     return banode
 end
 
-Base.isempty(tree::BeliefDPWTree) = isempty(tree.n) && isempty(tree.q)
+Base.isempty(tree::BasicBeliefDPWTree) = isempty(tree.n) && isempty(tree.q)
 
-# struct DPWBeliefNode{S,A} <: AbstractStateNode
-#     tree::BeliefDPWTree{S,A}
+# struct RealDPWBeliefNode{S,A} <: AbstractStateNode
+#     tree::BasicBeliefDPWTree{S,A}
 #     index::Int
 # end
 
-# children(n::DPWBeliefNode) = n.tree.children[n.index]
-# n_children(n::DPWBeliefNode) = length(children(n))
-# isroot(n::DPWBeliefNode) = n.index == 1
+# children(n::RealDPWBeliefNode) = n.tree.children[n.index]
+# n_children(n::RealDPWBeliefNode) = length(children(n))
+# isroot(n::RealDPWBeliefNode) = n.index == 1
 
-mutable struct BeliefDPWPlanner{P <: POMDP, UP, B, A, SE, NA, RCB, RNG, UCB, CRIT} <:
+mutable struct BasicBeliefDPWPlanner{P <: POMDP, UP, B, A, SE, NA, RCB, RNG, UCB, CRIT} <:
                AbstractMCTSPlanner{P}
-    solver::BeliefDPWSolver
+    solver::BasicBeliefDPWSolver
     updater::UP
     pomdp::P
     ucb::UCB
     criterion::CRIT
-    tree::Union{Nothing, BeliefDPWTree{B, A}}
+    tree::Union{Nothing, BasicBeliefDPWTree{B, A}}
     solved_estimate::SE
     next_action::NA
     reset_callback::RCB
     rng::RNG
 end
 
-function BeliefDPWPlanner(solver::BeliefDPWSolver, pomdp::P) where {P <: POMDP}
+function BasicBeliefDPWPlanner(solver::BasicBeliefDPWSolver, pomdp::P) where {P <: POMDP}
     se = convert_estimator(solver.estimate_value, solver, pomdp)
     B = typeof(initialize_belief(solver.updater, initialstate(pomdp)))
-    return BeliefDPWPlanner{
+    return BasicBeliefDPWPlanner{
         P,
         typeof(solver.updater),
         B,
@@ -338,8 +321,7 @@ function BeliefDPWPlanner(solver::BeliefDPWSolver, pomdp::P) where {P <: POMDP}
         typeof(solver.rng),
         typeof(solver.ucb),
         typeof(solver.criterion)
-    }(
-        solver,
+    }(solver,
         solver.updater,
         pomdp,
         solver.ucb,
@@ -352,4 +334,4 @@ function BeliefDPWPlanner(solver::BeliefDPWSolver, pomdp::P) where {P <: POMDP}
     )
 end
 
-Random.seed!(p::BeliefDPWPlanner, seed) = Random.seed!(p.rng, seed)
+Random.seed!(p::BasicBeliefDPWPlanner, seed) = Random.seed!(p.rng, seed)
