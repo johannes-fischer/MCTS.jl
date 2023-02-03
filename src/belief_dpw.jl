@@ -16,7 +16,7 @@ POMDPs.action(p::BeliefDPWPlanner, b) = first(action_info(p, b))
 """
 Construct an MCTSBeliefDPW tree and choose the best action. Also output some information.
 """
-function POMDPModelTools.action_info(
+function POMDPTools.action_info(
     p::BeliefDPWPlanner{P, UP, B, A},
     b;
     tree_in_info=false,
